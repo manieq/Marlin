@@ -30,9 +30,14 @@
 
 #include <U8glib.h>
 #include "dogm_bitmaps.h"
+#ifdef PCD8544
+  #include "pcd8544_bitmaps.h"
+#endif
 
 #include "ultralcd.h"
-#include "ultralcd_st7920_u8glib_rrd.h"
+#ifndef PCD8544
+  #include "ultralcd_st7920_u8glib_rrd.h"
+#endif
 #include "Configuration.h"
 
 // save 3120 bytes of PROGMEM by commenting out #define USE_BIG_EDIT_FONT
@@ -44,7 +49,7 @@
 // If you have spare 2300Byte of progmem and want to use a 
 // smaller font on the Info-screen uncomment the next line.
 //#define USE_SMALL_INFOFONT
-#ifdef USE_SMALL_INFOFONT
+#ifdef USE_SMALL_INFOFONT || PCD8544
   #include "dogm_font_data_6x9_marlin.h"
   #define FONT_STATUSMENU_NAME u8g_font_6x9
 #else
@@ -96,19 +101,29 @@
 #define FONT_MENU 4
 
 // DOGM parameters (size in pixels)
-#define DOG_CHAR_WIDTH         6
-#define DOG_CHAR_HEIGHT        12
-#ifdef USE_BIG_EDIT_FONT
-  #define FONT_MENU_EDIT_NAME u8g_font_9x18
-  #define DOG_CHAR_WIDTH_EDIT  9
-  #define DOG_CHAR_HEIGHT_EDIT 18
-  #define LCD_WIDTH_EDIT       14
-#else
+#ifdef PCD8544
+  #define DOG_CHAR_WIDTH         6
+  #define DOG_CHAR_HEIGHT        9
   #define FONT_MENU_EDIT_NAME FONT_MENU_NAME
   #define DOG_CHAR_WIDTH_EDIT  6
-  #define DOG_CHAR_HEIGHT_EDIT 12
-  #define LCD_WIDTH_EDIT       22
-#endif
+  #define DOG_CHAR_HEIGHT_EDIT 9
+  #define LCD_WIDTH_EDIT       10
+  #define FONT_STATUS_MSG_NAME u8g_font_5x8
+#else // !PCD8544
+  #define DOG_CHAR_WIDTH         6
+  #define DOG_CHAR_HEIGHT        12
+  #ifdef USE_BIG_EDIT_FONT
+    #define FONT_MENU_EDIT_NAME u8g_font_9x18
+    #define DOG_CHAR_WIDTH_EDIT  9
+    #define DOG_CHAR_HEIGHT_EDIT 18
+    #define LCD_WIDTH_EDIT       14
+  #else
+    #define FONT_MENU_EDIT_NAME FONT_MENU_NAME
+    #define DOG_CHAR_WIDTH_EDIT  6
+    #define DOG_CHAR_HEIGHT_EDIT 12
+    #define LCD_WIDTH_EDIT       22
+  #endif
+#endif // PCD8544
 
 #ifndef TALL_FONT_CORRECTION
   #define TALL_FONT_CORRECTION 0
@@ -117,7 +132,17 @@
 #define START_ROW              0
 
 // LCD selection
-#ifdef U8GLIB_ST7920
+#if defined(PCD8544)
+  //U8GLIB_PCD8544 u8g(13, 11, 10, 9, 8);		// SPI Com: SCK = 13, MOSI = 11, CS = 10, A0 = 9, Reset = 8
+  // Based on RAMPS 1.4
+  //  Reset      #define LCD_PINS_RS 16
+  //  A0         #define LCD_PINS_ENABLE 17
+  //  CS         #define LCD_PINS_D4 23
+  //  MOSI       #define LCD_PINS_D5 25
+  //  SCK        #define LCD_PINS_D6 27
+  #define LCD_PIN_BL LCD_PINS_D7
+  U8GLIB_PCD8544 u8g(LCD_PINS_D6, LCD_PINS_D5, LCD_PINS_ENABLE, LCD_PINS_D4, LCD_PINS_RS);
+#elif defined(U8GLIB_ST7920)
   //U8GLIB_ST7920_128X64_RRD u8g(0,0,0);
   U8GLIB_ST7920_128X64_RRD u8g(0);
 #elif defined(MAKRPANEL)
@@ -260,13 +285,47 @@ static void _draw_heater_status(int x, int heater) {
   }
 }
 
+static void _draw_pcd8544_heater_status(int heater) {
+  bool isBed = heater < 0;
+  int x = 12 + (isBed ? 34 : 0);
+  int y = 8;
+
+  if (!isBed) {
+    u8g.setColorIndex(0); // black on white
+    u8g.setPrintPos(2,y);
+    lcd_print('1'+heater);
+    u8g.setColorIndex(1); // black on white
+  }
+
+  lcd_setFont(FONT_STATUSMENU);
+    u8g.setPrintPos(x,y);
+  if (blink % 2) {
+    lcd_print(itostr3(int((!isBed ? degTargetHotend(heater) : degTargetBed()) + 0.5)));
+  } else {
+    lcd_print(itostr3(int((!isBed ? degHotend(heater) : degBed()) + 0.5)));
+  }
+
+  if (!isHeatingHotend(heater)) {
+    u8g.drawBox(4,y,2,2);
+  }
+  else {
+    u8g.setColorIndex(0); // white on black
+    u8g.drawBox(4,y,2,2);
+    u8g.setColorIndex(1); // black on white
+  }
+}
+
 static void lcd_implementation_status_screen() {
   u8g.setColorIndex(1); // black on white
 
   // Symbols menu graphics, animated fan
+#ifdef PCD8544  
+  u8g.drawBitmapP(0,0,STATUS_SCREENBYTEWIDTH,STATUS_SCREENHEIGHT, (blink % 2) ? pcd8544_screen0_bmp : pcd8544_screen1_bmp);
+#else
   u8g.drawBitmapP(9,1,STATUS_SCREENBYTEWIDTH,STATUS_SCREENHEIGHT, (blink % 2) && fanSpeed ? status_screen0_bmp : status_screen1_bmp);
+#endif
  
-  #ifdef SDSUPPORT
+  #if defined(SDSUPPORT) && !defined(PCD8544)
     // SD Card Symbol
     u8g.drawBox(42, 42 - TALL_FONT_CORRECTION, 8, 7);
     u8g.drawBox(50, 44 - TALL_FONT_CORRECTION, 2, 5);
@@ -295,71 +354,114 @@ static void lcd_implementation_status_screen() {
     else {
       lcd_printPGM(PSTR("--:--"));
     }
+  #elif defined(SDSUPPORT) && defined(PCD8544)
+    if (print_job_start_ms != 0) {
+      uint16_t time = (millis() - print_job_start_ms) / 1000;
+      uint8_t tsec = time % 60;
+      uint8_t tmin = (time/60) % 60;
+      uint8_t thr  = (time/3600);
+      u8g.setPrintPos(72,39);
+      lcd_print(itostr2(tsec));
+      u8g.setPrintPos(58,39);
+      lcd_print(itostr2(tmin));
+      u8g.setPrintPos(50,39);
+      lcd_print('0'+thr);
+    }
   #endif
 
-  // Extruders
-  for (int i=0; i<EXTRUDERS; i++) _draw_heater_status(6 + i * 25, i);
-
-  // Heatbed
-  if (EXTRUDERS < 4) _draw_heater_status(81, -1);
-
-  // Fan
-  lcd_setFont(FONT_STATUSMENU);
-  u8g.setPrintPos(104,27);
-  #if HAS_FAN
-    int per = ((fanSpeed + 1) * 100) / 256;
-    if (per) {
-      lcd_print(itostr3(per));
-      lcd_print('%');
-    }
-    else
-  #endif
-    {
-      lcd_printPGM(PSTR("---"));
-    }
-
-  // X, Y, Z-Coordinates
-  #define XYZ_BASELINE 38
-  lcd_setFont(FONT_STATUSMENU);
-
-  #ifdef USE_SMALL_INFOFONT
+  #ifndef PCD8544
+    // Extruders
+    for (int i=0; i<EXTRUDERS; i++) _draw_heater_status(6 + i * 25, i);
+  
+    // Heatbed
+    if (EXTRUDERS < 4) _draw_heater_status(81, -1);
+  
+    // Fan
+    lcd_setFont(FONT_STATUSMENU);
+    u8g.setPrintPos(104,27);
+    #if HAS_FAN
+      int per = ((fanSpeed + 1) * 100) / 256;
+      if (per) {
+        lcd_print(itostr3(per));
+        lcd_print('%');
+      }
+      else
+    #endif
+      {
+        lcd_printPGM(PSTR("---"));
+      }
+  #else // PCD8544
+   _draw_pcd8544_heater_status((blink/4) % EXTRUDERS);
+   _draw_pcd8544_heater_status(-1);
+   // drawfan speed
+   int ft = ((fanSpeed+1)*10)/256;
+   u8g.drawTriangle(74, 10, 74+ft, 10-ft, 74+ft, 10);
+  #endif // PCD8544
+  
+  #ifndef PCD8544
+    // X, Y, Z-Coordinates
+    #define XYZ_BASELINE 38
+    lcd_setFont(FONT_STATUSMENU);
+  
+    #ifdef USE_SMALL_INFOFONT
     u8g.drawBox(0,30,LCD_PIXEL_WIDTH,10);
-  #else
+    #else
     u8g.drawBox(0,30,LCD_PIXEL_WIDTH,9);
-  #endif
-  u8g.setColorIndex(0); // white on black
-  u8g.setPrintPos(2,XYZ_BASELINE);
-  lcd_print('X');
-  u8g.drawPixel(8,XYZ_BASELINE - 5);
-  u8g.drawPixel(8,XYZ_BASELINE - 3);
-  u8g.setPrintPos(10,XYZ_BASELINE);
-  lcd_print(ftostr31ns(current_position[X_AXIS]));
-  u8g.setPrintPos(43,XYZ_BASELINE);
-  lcd_print('Y');
-  u8g.drawPixel(49,XYZ_BASELINE - 5);
-  u8g.drawPixel(49,XYZ_BASELINE - 3);
-  u8g.setPrintPos(51,XYZ_BASELINE);
-  lcd_print(ftostr31ns(current_position[Y_AXIS]));
-  u8g.setPrintPos(83,XYZ_BASELINE);
-  lcd_print('Z');
-  u8g.drawPixel(89,XYZ_BASELINE - 5);
-  u8g.drawPixel(89,XYZ_BASELINE - 3);
-  u8g.setPrintPos(91,XYZ_BASELINE);
-  lcd_print(ftostr31(current_position[Z_AXIS]));
-  u8g.setColorIndex(1); // black on white
+    #endif
+    u8g.setColorIndex(0); // white on black
+    u8g.setPrintPos(2,XYZ_BASELINE);
+    lcd_print('X');
+    u8g.drawPixel(8,XYZ_BASELINE - 5);
+    u8g.drawPixel(8,XYZ_BASELINE - 3);
+    u8g.setPrintPos(10,XYZ_BASELINE);
+    lcd_print(ftostr31ns(current_position[X_AXIS]));
+    u8g.setPrintPos(43,XYZ_BASELINE);
+    lcd_print('Y');
+    u8g.drawPixel(49,XYZ_BASELINE - 5);
+    u8g.drawPixel(49,XYZ_BASELINE - 3);
+    u8g.setPrintPos(51,XYZ_BASELINE);
+    lcd_print(ftostr31ns(current_position[Y_AXIS]));
+    u8g.setPrintPos(83,XYZ_BASELINE);
+    lcd_print('Z');
+    u8g.drawPixel(89,XYZ_BASELINE - 5);
+    u8g.drawPixel(89,XYZ_BASELINE - 3);
+    u8g.setPrintPos(91,XYZ_BASELINE);
+    lcd_print(ftostr31(current_position[Z_AXIS]));
+    u8g.setColorIndex(1); // black on white
+  #else // PCD8544
+    u8g.setColorIndex(0); // white on black
+    u8g.setPrintPos(12, 20);
+    lcd_print(ftostr3(current_position[X_AXIS]));
+    u8g.setPrintPos(12, 29);
+    lcd_print(ftostr3(current_position[Y_AXIS]));
+    u8g.setPrintPos(54,20);
+    lcd_print(ftostr31ns(current_position[Z_AXIS]));
+    u8g.setPrintPos(48,29);
+    lcd_print(1+ftostr51(current_position[E_AXIS]));
+    u8g.setColorIndex(1); // black on white
+  #endif // PCD8544
  
   // Feedrate
   lcd_setFont(FONT_MENU);
-  u8g.setPrintPos(3,49);
-  lcd_print(LCD_STR_FEEDRATE[0]);
-  lcd_setFont(FONT_STATUSMENU);
-  u8g.setPrintPos(12,49);
-  lcd_print(itostr3(feedrate_multiplier));
-  lcd_print('%');
+  #ifdef PCD8544
+    u8g.setPrintPos(10,39);
+    lcd_print(itostr3(feedrate_multiplier));
+  #else
+    u8g.setPrintPos(3,49);
+    lcd_print(LCD_STR_FEEDRATE[0]);
+    lcd_setFont(FONT_STATUSMENU);
+    u8g.setPrintPos(12,49);
+    lcd_print(itostr3(feedrate_multiplier));
+    lcd_print('%');
+  #endif
 
   // Status line
   lcd_setFont(FONT_STATUSMENU);
-  #ifdef USE_SMALL_INFOFONT
+  #ifdef PCD8544
+    u8g.setPrintPos(0,47);
+    u8g.setColorIndex(0); // black on white
+    u8g.setFont(FONT_STATUS_MSG_NAME);
+  #elif defined(USE_SMALL_INFOFONT)
     u8g.setPrintPos(0,62);
   #else
     u8g.setPrintPos(0,63);

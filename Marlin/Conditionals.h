@@ -141,6 +141,10 @@
       #define LCD_WIDTH 20
       #define LCD_HEIGHT 4
     #endif
+    #ifdef PCD8544
+      #define LCD_WIDTH 14
+      #define LCD_HEIGHT 5
+    #endif
   #else //no panel but just LCD
     #ifdef ULTRA_LCD
       #ifdef DOGLCD // Change number of lines to match the 128x64 graphics display
